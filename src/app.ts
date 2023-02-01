@@ -4,62 +4,59 @@ import cors from 'cors';
 import {MongoClient, ObjectId, ServerApiVersion} from 'mongodb'
 import {
     validate,
-    Length,
-    IsString
 } from 'class-validator';
+import dotenv from 'dotenv';
+import {Task} from "./types";
+import {authenticatedUser, authenticationMiddleware} from "./middleware";
 
+const jwt = require('jsonwebtoken');
+
+dotenv.config();
 const app: Express = express();
 
 app.use(express.json());
 app.use(express.urlencoded({extended: true}));
 app.use(cors({origin: '*'}));
+app.use(authenticationMiddleware)
 
+// Database connection
+const uri = process.env.URI as string;
+const client = new MongoClient(uri, {serverApi: ServerApiVersion.v1});
+const tasksDatabase = client.db('TasksDatabase');
+const tasksCollection = tasksDatabase.collection('TasksCollection');
+const usersCollection = tasksDatabase.collection('UsersCollection');
+
+// ROUTES
 app.get("/", (req: Request, res: Response) => {
     res.send("Hello World from Express");
 });
 
-class Task {
-    id?: number;
-
-    @IsString()
-    @Length(5, 50)
-    name: string;
-
-    @IsString()
-    @Length(10, 500)
-    description: string;
-    completedAt: string | null;
-    createdAt: string | null;
-
-    constructor(name: string, description: string, completedAt: string | null, createdAt: string | null) {
-        this.id = undefined;
-        this.name = name;
-        this.description = description;
-        this.completedAt = completedAt;
-        this.createdAt = createdAt;
-    }
-}
-
-// Database connection
-const uri = "";
-const client = new MongoClient(uri, {serverApi: ServerApiVersion.v1});
-const tasksDatabase = client.db('TasksDatabase');
-const tasksCollection = tasksDatabase.collection('TasksCollection');
-const tasks: Task[] = [];
-
-// ROUTES
 const router = express.Router();
 
-router.get("/tasks", async (req: Request, res: Response) => {
+router.post("/login", async (req: Request, res: Response) => {
+    const {email, password} = req.body;
+    if (!email || !password) {
+        return res.status(400).json({error: "Invalid email or password"});
+    }
+    const user = await usersCollection.findOne({email: email, password: password});
+    if (!user) {
+        return res.status(400).json({error: "User Not Found!"});
+    }
+
+    const token = jwt.sign({id: user._id, email: email}, process.env.SECRET as string, {expiresIn: 60 * 60 * 24});
+    res.status(200).json({token: token});
+});
+
+router.get("/tasks", authenticatedUser, async (req: Request, res: Response) => {
     const tasks = await tasksCollection.find().toArray();
     res.status(200).json(tasks);
 });
 
-router.post("/tasks/", async (req: Request, res: Response) => {
+router.post("/tasks/", authenticatedUser, async (req: Request, res: Response) => {
     const {name, description} = req.body;
     const task: Task = new Task(name, description, null, new Date().toISOString());
     const errors = await validate(task);
-    if(errors.length > 0) {
+    if (errors.length > 0) {
         res.status(400).json(errors);
         return;
     }
@@ -81,7 +78,7 @@ router.get("/tasks/:id", async (req: Request, res: Response) => {
     res.status(200).json(task);
 });
 
-router.put("/tasks/:id", async (req: Request, res: Response) => {
+router.put("/tasks/:id", authenticatedUser, async (req: Request, res: Response) => {
     let id: ObjectId | null = null;
     try {
         id = new ObjectId(req.params.id);

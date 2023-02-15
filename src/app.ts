@@ -109,6 +109,6 @@ router.delete("/tasks", async (req: Request, res: Response) => {
 // Adding Router to Express App
 app.use(router);
 
-http.createServer(app).listen(3000, () => {
+http.createServer(app).listen(process.env.PORT || 3000, () => {
     console.log("Server is running on port 3000");
 });
